@@ -250,8 +250,12 @@ def visualize_predictions(
     
     # Convert to array for WandB
     fig.canvas.draw()
-    img_array = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-    img_array = img_array.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    # Use buffer_rgba() instead of deprecated tostring_rgb()
+    buffer = fig.canvas.buffer_rgba()
+    img_array = np.frombuffer(buffer, dtype=np.uint8)
+    img_array = img_array.reshape(fig.canvas.get_width_height()[::-1] + (4,))
+    # Convert RGBA to RGB by dropping alpha channel
+    img_array = img_array[:, :, :3]
     
     plt.close()
     

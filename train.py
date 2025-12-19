@@ -6,7 +6,7 @@ Supports CIFAR-10 dataset with DINOv2, MAE, SwinV2, ViT, CLIP, VLA, Custom model
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 import argparse
 from tqdm import tqdm
 import os
@@ -46,7 +46,7 @@ def validate_batch(
     labels = labels.to(device)
     
     with torch.no_grad():
-        with autocast(dtype=torch.float16):
+        with autocast(device_type='cuda', dtype=torch.float16):
             logits, aux_outputs = model(images)
             loss = criterion(logits, labels)
         
@@ -91,7 +91,7 @@ def train_epoch(
         optimizer.zero_grad()
         
         # Mixed precision training with FP16
-        with autocast(dtype=torch.float16):
+        with autocast(device_type='cuda', dtype=torch.float16):
             logits, aux_outputs = model(images)
             loss = criterion(logits, labels)
         
@@ -181,7 +181,7 @@ def validate(
                 
             images, labels = images.to(device), labels.to(device)
             
-            with autocast(dtype=torch.float16):
+            with autocast(device_type='cuda', dtype=torch.float16):
                 logits, aux_outputs = model(images)
                 loss = criterion(logits, labels)
             
@@ -275,7 +275,7 @@ def main(args):
     )
     
     # Mixed precision scaler for FP16
-    scaler = GradScaler()
+    scaler = GradScaler(init_scale=65536.0)
     
     # Load checkpoint if resuming
     start_epoch = 0
