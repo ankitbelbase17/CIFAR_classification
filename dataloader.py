@@ -1,6 +1,5 @@
 """
-dataloader.py - Dataset and DataLoader for image classification
-Supports multiple datasets and preprocessing pipelines
+dataloader.py - Dataset and DataLoader for CIFAR-10 image classification
 """
 
 import torch
@@ -9,18 +8,18 @@ from torchvision import datasets, transforms
 from transformers import AutoImageProcessor
 from PIL import Image
 import os
-from typing import Tuple, Optional, Dict
+from typing import Tuple, Optional, Dict, List
 import numpy as np
 
 
-class ImageClassificationDataset(Dataset):
-    """Generic image classification dataset"""
+class CIFAR10Dataset(Dataset):
+    """CIFAR-10 image classification dataset"""
     def __init__(
         self,
         root_dir: str,
         split: str = 'train',
-        transform = None,
-        model_name: str = 'dinov2'
+        model_name: str = 'dinov2',
+        download: bool = True
     ):
         self.root_dir = root_dir
         self.split = split
@@ -28,18 +27,20 @@ class ImageClassificationDataset(Dataset):
         
         # Load image processor based on model
         self.processor = self._get_processor(model_name)
-        self.transform = transform
         
-        # Load dataset (assuming ImageFolder structure)
-        data_path = os.path.join(root_dir, split)
-        if os.path.exists(data_path):
-            self.dataset = datasets.ImageFolder(data_path)
-            self.classes = self.dataset.classes
-            self.class_to_idx = self.dataset.class_to_idx
-        else:
-            raise ValueError(f"Dataset path {data_path} does not exist")
+        # Load CIFAR-10 dataset
+        is_train = (split == 'train')
+        self.dataset = datasets.CIFAR10(
+            root=root_dir,
+            train=is_train,
+            download=download,
+            transform=None
+        )
         
-        print(f"Loaded {len(self.dataset)} images from {split} split")
+        self.classes = self.dataset.classes
+        self.class_to_idx = {cls: idx for idx, cls in enumerate(self.classes)}
+        
+        print(f"Loaded {len(self.dataset)} images from CIFAR-10 {split} split")
         print(f"Classes: {self.classes}")
         
     def _get_processor(self, model_name: str):
@@ -50,7 +51,8 @@ class ImageClassificationDataset(Dataset):
             'swin': 'microsoft/swinv2-base-patch4-window8-256',
             'vit': 'google/vit-base-patch16-224',
             'clip': 'openai/clip-vit-base-patch32',
-            'vla': 'google/siglip-base-patch16-224'
+            'vla': 'google/siglip-base-patch16-224',
+            'custom': 'google/vit-base-patch16-224-in21k'
         }
         
         model_id = processor_map.get(model_name.lower(), 'google/vit-base-patch16-224')
@@ -60,11 +62,9 @@ class ImageClassificationDataset(Dataset):
         return len(self.dataset)
     
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int, Dict]:
-        image, label = self.dataset[idx]
-        
-        # Apply custom transforms if provided
-        if self.transform:
-            image = self.transform(image)
+        # Get image and label from CIFAR-10
+        image_array, label = self.dataset[idx]
+        image = Image.fromarray(image_array)
         
         # Process with model-specific processor
         processed = self.processor(images=image, return_tensors="pt")
@@ -73,19 +73,18 @@ class ImageClassificationDataset(Dataset):
         # Return image, label, and metadata
         metadata = {
             'idx': idx,
-            'image_path': self.dataset.imgs[idx][0],
             'class_name': self.classes[label]
         }
         
         return pixel_values, label, metadata
 
 
-class AugmentedImageDataset(ImageClassificationDataset):
-    """Dataset with advanced augmentations for training"""
+class AugmentedCIFAR10Dataset(CIFAR10Dataset):
+    """CIFAR-10 dataset with advanced augmentations for training"""
     def __init__(self, *args, **kwargs):
         # Define augmentations before calling super
         self.augment_transform = transforms.Compose([
-            transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
+            transforms.RandomCrop(32, padding=4),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomRotation(15),
             transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
@@ -95,9 +94,11 @@ class AugmentedImageDataset(ImageClassificationDataset):
         super().__init__(*args, **kwargs)
         
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int, Dict]:
-        image, label = self.dataset[idx]
+        # Get raw image from CIFAR-10
+        image_array, label = self.dataset[idx]
+        image = Image.fromarray(image_array)
         
-        # Apply augmentations
+        # Apply augmentations for training
         if self.split == 'train':
             image = self.augment_transform(image)
         
@@ -107,7 +108,6 @@ class AugmentedImageDataset(ImageClassificationDataset):
         
         metadata = {
             'idx': idx,
-            'image_path': self.dataset.imgs[idx][0],
             'class_name': self.classes[label]
         }
         
@@ -121,12 +121,12 @@ def get_dataloaders(
     num_workers: int = 4,
     use_augmentation: bool = True,
     pin_memory: bool = True
-) -> Tuple[DataLoader, DataLoader, DataLoader, list]:
+) -> Tuple[DataLoader, DataLoader, List[str]]:
     """
-    Create train, validation, and test dataloaders
+    Create train and test dataloaders for CIFAR-10
     
     Args:
-        root_dir: Root directory containing train/val/test folders
+        root_dir: Root directory for CIFAR-10 dataset
         model_name: Model name for processor selection
         batch_size: Batch size
         num_workers: Number of data loading workers
@@ -134,28 +134,24 @@ def get_dataloaders(
         pin_memory: Pin memory for faster GPU transfer
     
     Returns:
-        train_loader, val_loader, test_loader, class_names
+        train_loader, test_loader, class_names
     """
     
-    DatasetClass = AugmentedImageDataset if use_augmentation else ImageClassificationDataset
+    DatasetClass = AugmentedCIFAR10Dataset if use_augmentation else CIFAR10Dataset
     
     # Create datasets
     train_dataset = DatasetClass(
         root_dir=root_dir,
         split='train',
-        model_name=model_name
+        model_name=model_name,
+        download=True
     )
     
-    val_dataset = ImageClassificationDataset(
-        root_dir=root_dir,
-        split='val',
-        model_name=model_name
-    )
-    
-    test_dataset = ImageClassificationDataset(
+    test_dataset = CIFAR10Dataset(
         root_dir=root_dir,
         split='test',
-        model_name=model_name
+        model_name=model_name,
+        download=True
     )
     
     # Create dataloaders
@@ -168,14 +164,6 @@ def get_dataloaders(
         drop_last=True
     )
     
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=pin_memory
-    )
-    
     test_loader = DataLoader(
         test_dataset,
         batch_size=batch_size,
@@ -185,14 +173,14 @@ def get_dataloaders(
     )
     
     print(f"\n{'='*50}")
-    print(f"DataLoaders created:")
+    print(f"CIFAR-10 DataLoaders created:")
     print(f"  Train: {len(train_loader)} batches ({len(train_dataset)} samples)")
-    print(f"  Val:   {len(val_loader)} batches ({len(val_dataset)} samples)")
     print(f"  Test:  {len(test_loader)} batches ({len(test_dataset)} samples)")
     print(f"  Batch size: {batch_size}, Workers: {num_workers}")
+    print(f"  Classes: {len(train_dataset.classes)} ({', '.join(train_dataset.classes)})")
     print(f"{'='*50}\n")
     
-    return train_loader, val_loader, test_loader, train_dataset.classes
+    return train_loader, test_loader, train_dataset.classes
 
 
 def collate_fn(batch):
@@ -206,12 +194,34 @@ def collate_fn(batch):
 
 
 if __name__ == "__main__":
-    # Test dataloader
+    # Test CIFAR-10 dataloader
     import tempfile
     import shutil
     
-    # Create dummy dataset structure
     temp_dir = tempfile.mkdtemp()
+    
+    try:
+        print("Testing CIFAR-10 dataloaders...")
+        train_loader, test_loader, classes = get_dataloaders(
+            root_dir=temp_dir,
+            model_name='dinov2',
+            batch_size=32,
+            num_workers=0,
+            use_augmentation=True
+        )
+        
+        # Test batch
+        images, labels, metadata = next(iter(train_loader))
+        print(f"\nBatch test:")
+        print(f"  Images shape: {images.shape}")
+        print(f"  Labels shape: {labels.shape}")
+        print(f"  Classes: {classes}")
+        print(f"  Number of classes: {len(classes)}")
+        print(f"  Metadata sample: {metadata[0]}")
+        print(f"\n✓ CIFAR-10 dataloader working correctly!")
+        
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
     
     try:
         for split in ['train', 'val', 'test']:

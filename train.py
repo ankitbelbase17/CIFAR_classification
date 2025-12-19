@@ -1,6 +1,6 @@
 """
 train.py - Training script for image classification models
-Supports DINOv2, MAE, SwinV2, ViT, CLIP, VLA
+Supports CIFAR-10 dataset with DINOv2, MAE, SwinV2, ViT, CLIP, VLA, Custom models
 """
 
 import torch
@@ -24,7 +24,7 @@ from metrics import calculate_metrics
 
 def validate_batch(
     model: nn.Module,
-    val_loader,
+    test_loader,
     criterion,
     device
 ) -> tuple:
@@ -32,9 +32,13 @@ def validate_batch(
     model.eval()
     
     # Get one batch
-    val_iter = iter(val_loader)
+    test_iter = iter(test_loader)
     try:
-        images, labels, metadata = next(val_iter)
+        batch = next(test_iter)
+        if len(batch) == 3:
+            images, labels, metadata = batch
+        else:
+            images, labels = batch
     except StopIteration:
         return 0.0, 0.0
     
@@ -58,7 +62,7 @@ def validate_batch(
 def train_epoch(
     model: nn.Module,
     train_loader,
-    val_loader,
+    test_loader,
     criterion,
     optimizer,
     scaler,
@@ -76,7 +80,12 @@ def train_epoch(
     
     pbar = tqdm(train_loader, desc=f'Epoch {epoch}')
     
-    for batch_idx, (images, labels, metadata) in enumerate(pbar):
+    for batch_idx, batch in enumerate(pbar):
+        if len(batch) == 3:
+            images, labels, metadata = batch
+        else:
+            images, labels = batch
+            
         images, labels = images.to(device), labels.to(device)
         
         optimizer.zero_grad()
@@ -148,7 +157,7 @@ def train_epoch(
 
 def validate(
     model: nn.Module,
-    val_loader,
+    test_loader,
     criterion,
     device,
     class_names: list
@@ -164,7 +173,12 @@ def validate(
     all_logits = []
     
     with torch.no_grad():
-        for images, labels, metadata in tqdm(val_loader, desc='Validation'):
+        for batch in tqdm(test_loader, desc='Validation'):
+            if len(batch) == 3:
+                images, labels, metadata = batch
+            else:
+                images, labels = batch
+                
             images, labels = images.to(device), labels.to(device)
             
             with autocast(dtype=torch.float16):
@@ -214,8 +228,8 @@ def main(args):
     setup_wandb(config, project_name="cv_classification")
     
     # Load data
-    print("\nLoading data...")
-    train_loader, val_loader, test_loader, class_names = get_dataloaders(
+    print("\nLoading CIFAR-10 data...")
+    train_loader, test_loader, class_names = get_dataloaders(
         root_dir=args.data_dir,
         model_name=args.model_name,
         batch_size=args.batch_size,
@@ -292,13 +306,13 @@ def main(args):
     for epoch in range(start_epoch, args.epochs):
         # Train
         train_loss, train_acc, global_iter = train_epoch(
-            model, train_loader, val_loader, criterion, optimizer, scaler,
+            model, train_loader, test_loader, criterion, optimizer, scaler,
             device, epoch, global_iter, config, exp_dir
         )
         
-        # Validate
-        val_loss, val_acc, val_metrics = validate(
-            model, val_loader, criterion, device, class_names
+        # Validate on test set
+        test_loss, test_acc, test_metrics = validate(
+            model, test_loader, criterion, device, class_names
         )
         
         # Update scheduler
@@ -306,31 +320,31 @@ def main(args):
         
         # Store metrics
         train_losses.append(train_loss)
-        val_losses.append(val_loss)
+        val_losses.append(test_loss)
         train_accs.append(train_acc)
-        val_accs.append(val_acc)
+        val_accs.append(test_acc)
         
         # Log epoch metrics to WandB
         epoch_metrics = {
             'epoch': epoch,
             'train/epoch_loss': train_loss,
             'train/epoch_accuracy': train_acc,
-            'val/loss': val_loss,
-            'val/accuracy': val_acc,
-            **{f'val/{k}': v for k, v in val_metrics.items()}
+            'val/loss': test_loss,
+            'val/accuracy': test_acc,
+            **{f'val/{k}': v for k, v in test_metrics.items()}
         }
         log_to_wandb(epoch_metrics, global_iter)
         
         # Print epoch summary
         print(f"\nEpoch {epoch} Summary:")
         print(f"  Train - Loss: {train_loss:.4f}, Acc: {train_acc:.2f}%")
-        print(f"  Val   - Loss: {val_loss:.4f}, Acc: {val_acc:.2f}%")
-        print(f"  Val F1: {val_metrics['f1_macro']:.4f}")
+        print(f"  Test  - Loss: {test_loss:.4f}, Acc: {test_acc:.2f}%")
+        print(f"  Test F1: {test_metrics['f1_macro']:.4f}")
         
         # Save best model
-        is_best = val_acc > best_val_acc
+        is_best = test_acc > best_val_acc
         if is_best:
-            best_val_acc = val_acc
+            best_val_acc = test_acc
         
         save_checkpoint(
             model, optimizer, scheduler, epoch, global_iter,
