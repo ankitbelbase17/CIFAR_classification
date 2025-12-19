@@ -115,9 +115,9 @@ def train_epoch(
         
         global_iter += 1
         
-        # Validate on a single batch
+        # Validate on a single batch using test_loader
         val_loss, val_acc = validate_batch(
-            model, val_loader, criterion, device)
+            model, test_loader, criterion, device)
         
         # Log to WandB every iteration
         if global_iter % config.get('log_interval', 10) == 0:
@@ -194,7 +194,7 @@ def validate(
             all_labels.extend(labels.cpu().numpy())
             all_logits.append(logits.cpu())
     
-    val_loss = running_loss / len(val_loader)
+    val_loss = running_loss / len(test_loader)
     val_acc = 100. * correct / total
     
     # Calculate detailed metrics

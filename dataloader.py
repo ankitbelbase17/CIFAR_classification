@@ -62,8 +62,11 @@ class CIFAR10Dataset(Dataset):
         return len(self.dataset)
     
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int, Dict]:
-        # Get image and label from CIFAR-10
-        image_array, label = self.dataset[idx]
+        # Get raw image array directly from CIFAR-10 data (not through __getitem__)
+        image_array = self.dataset.data[idx]
+        label = self.dataset.targets[idx]
+        
+        # Convert numpy array to PIL Image
         image = Image.fromarray(image_array)
         
         # Process with model-specific processor
@@ -94,8 +97,11 @@ class AugmentedCIFAR10Dataset(CIFAR10Dataset):
         super().__init__(*args, **kwargs)
         
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int, Dict]:
-        # Get raw image from CIFAR-10
-        image_array, label = self.dataset[idx]
+        # Get raw image array directly from CIFAR-10 data (not through __getitem__)
+        image_array = self.dataset.data[idx]
+        label = self.dataset.targets[idx]
+        
+        # Convert numpy array to PIL Image
         image = Image.fromarray(image_array)
         
         # Apply augmentations for training
