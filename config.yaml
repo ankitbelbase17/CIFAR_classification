@@ -1,0 +1,63 @@
+# Model settings
+model_name: 'dinov2'  # Options: dinov2, mae, swin, vit, clip, vla
+freeze_backbone: false
+num_classes: 10
+
+# Dataset settings
+data_dir: './data'
+dataset: 'custom'
+image_size: 224
+use_augmentation: true
+
+# Training settings
+batch_size: 32
+epochs: 50
+learning_rate: 0.0001
+weight_decay: 0.01
+warmup_epochs: 5
+label_smoothing: 0.1
+
+# Optimizer settings
+optimizer: 'adamw'
+momentum: 0.9
+betas: [0.9, 0.999]
+eps: 0.00000001
+
+# Scheduler settings
+scheduler: 'cosine'
+min_lr: 0.000001
+
+# Data loading
+num_workers: 4
+pin_memory: true
+prefetch_factor: 2
+
+# Logging and checkpointing
+log_interval: 10          # Log every N iterations
+viz_interval: 100         # Visualize predictions every N iterations
+save_interval: 250        # Save checkpoint every N iterations
+output_dir: './experiments'
+
+# WandB settings
+wandb_project: 'cv_classification'
+wandb_entity: null        # Set your wandb entity/username
+
+# Mixed precision training
+use_amp: true
+grad_clip: 1.0
+
+# Reproducibility
+seed: 42
+
+# Class names (update with your classes)
+class_names:
+  - 'class_0'
+  - 'class_1'
+  - 'class_2'
+  - 'class_3'
+  - 'class_4'
+  - 'class_5'
+  - 'class_6'
+  - 'class_7'
+  - 'class_8'
+  - 'class_9'
