@@ -207,7 +207,15 @@ class OpenVLAClassifier(nn.Module):
         super().__init__()
         # Using SigLIP as base (similar to VLA architectures)
         self.vision_encoder = AutoModel.from_pretrained(model_name)
-        self.hidden_size = self.vision_encoder.config.hidden_size
+        
+        # Get hidden size from config - handle different config structures
+        if hasattr(self.vision_encoder.config, 'vision_config'):
+            self.hidden_size = self.vision_encoder.config.vision_config.hidden_size
+        elif hasattr(self.vision_encoder.config, 'hidden_size'):
+            self.hidden_size = self.vision_encoder.config.hidden_size
+        else:
+            # Fallback: try to infer from model
+            self.hidden_size = 768
         
         if freeze_backbone:
             for param in self.vision_encoder.parameters():
@@ -231,10 +239,13 @@ class OpenVLAClassifier(nn.Module):
     def forward(self, pixel_values: torch.Tensor) -> Tuple[torch.Tensor, Dict]:
         outputs = self.vision_encoder(pixel_values, output_attentions=True, output_hidden_states=True)
         
-        # Pool features
-        if hasattr(outputs, 'pooler_output'):
+        # Pool features - handle different output structures
+        if hasattr(outputs, 'pooler_output') and outputs.pooler_output is not None:
             pooled = outputs.pooler_output
+        elif hasattr(outputs, 'image_embeds') and outputs.image_embeds is not None:
+            pooled = outputs.image_embeds
         else:
+            # Fallback: mean pooling
             pooled = outputs.last_hidden_state.mean(dim=1)
         
         logits = self.classifier(pooled)

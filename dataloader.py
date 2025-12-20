@@ -71,7 +71,30 @@ class CIFAR10Dataset(Dataset):
         
         # Process with model-specific processor
         processed = self.processor(images=image, return_tensors="pt")
-        pixel_values = processed['pixel_values'].squeeze(0)
+        
+        # Handle different processor output keys
+        pixel_values = None
+        
+        # Try different keys in order of likelihood
+        for key in ['pixel_values', 'image', 'images']:
+            if key in processed:
+                pixel_values = processed[key]
+                break
+        
+        # If still None, get the first tensor that isn't None
+        if pixel_values is None:
+            for v in processed.values():
+                if isinstance(v, torch.Tensor):
+                    pixel_values = v
+                    break
+        
+        # Ensure we have pixel values
+        if pixel_values is None:
+            raise ValueError(f"Could not extract pixel values from processor output. Keys: {list(processed.keys())}")
+        
+        # Squeeze batch dimension if present
+        if pixel_values.dim() == 4:
+            pixel_values = pixel_values.squeeze(0)
         
         # Return image, label, and metadata
         metadata = {
@@ -110,7 +133,30 @@ class AugmentedCIFAR10Dataset(CIFAR10Dataset):
         
         # Process with model-specific processor
         processed = self.processor(images=image, return_tensors="pt")
-        pixel_values = processed['pixel_values'].squeeze(0)
+        
+        # Handle different processor output keys
+        pixel_values = None
+        
+        # Try different keys in order of likelihood
+        for key in ['pixel_values', 'image', 'images']:
+            if key in processed:
+                pixel_values = processed[key]
+                break
+        
+        # If still None, get the first tensor that isn't None
+        if pixel_values is None:
+            for v in processed.values():
+                if isinstance(v, torch.Tensor):
+                    pixel_values = v
+                    break
+        
+        # Ensure we have pixel values
+        if pixel_values is None:
+            raise ValueError(f"Could not extract pixel values from processor output. Keys: {list(processed.keys())}")
+        
+        # Squeeze batch dimension if present
+        if pixel_values.dim() == 4:
+            pixel_values = pixel_values.squeeze(0)
         
         metadata = {
             'idx': idx,
