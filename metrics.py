@@ -38,6 +38,9 @@ def calculate_metrics(
     """
     y_true = np.array(y_true)
     y_pred = np.array(y_pred)
+    # Move logits to CPU if on CUDA before converting to numpy
+    if y_logits.device.type == 'cuda':
+        y_logits = y_logits.cpu()
     y_probs = torch.softmax(y_logits, dim=1).numpy()
     
     num_classes = len(class_names)
@@ -311,54 +314,148 @@ def generate_metrics_summary(
 
 
 if __name__ == "__main__":
-    # Test metrics calculation
-    print("Testing metrics module...")
+    import argparse
+    from tqdm import tqdm
+    from model import get_model
+    from dataloader import get_dataloaders
+    from utils import load_checkpoint, get_device
     
-    # Generate dummy data
-    np.random.seed(42)
-    n_samples = 100
-    n_classes = 5
+    parser = argparse.ArgumentParser(description='Run metrics on test set')
+    parser.add_argument('--model_name', type=str, required=True,
+                        choices=['dinov2', 'mae', 'swin', 'vit', 'clip', 'vla', 'custom'],
+                        help='Model architecture')
+    parser.add_argument('--checkpoint', type=str, required=True,
+                        help='Path to model checkpoint')
+    parser.add_argument('--data_dir', type=str, required=True,
+                        help='Path to CIFAR-10 data directory')
+    parser.add_argument('--batch_size', type=int, default=32,
+                        help='Batch size for evaluation')
+    parser.add_argument('--num_workers', type=int, default=4,
+                        help='Number of data loading workers')
+    parser.add_argument('--output_dir', type=str, default='metrics_results',
+                        help='Output directory for results')
     
-    y_true = np.random.randint(0, n_classes, n_samples)
-    y_pred = y_true.copy()
-    # Add some noise
-    noise_idx = np.random.choice(n_samples, size=20, replace=False)
-    y_pred[noise_idx] = np.random.randint(0, n_classes, 20)
+    args = parser.parse_args()
     
-    # Create dummy logits
-    y_logits = torch.randn(n_samples, n_classes)
+    # Get device
+    device = get_device()
+    print(f"✓ Using device: {device}")
     
-    class_names = [f'Class_{i}' for i in range(n_classes)]
+    # Load model
+    print(f"✓ Loading {args.model_name} model...")
+    model = get_model(args.model_name, num_classes=10)
+    
+    # Load checkpoint if it exists
+    if os.path.exists(args.checkpoint):
+        try:
+            checkpoint_data = load_checkpoint(args.checkpoint, model, device=device)
+            print(f"✓ Loaded checkpoint from {args.checkpoint}")
+        except RuntimeError as e:
+            print(f"⚠ Warning: Could not load checkpoint - {e}")
+            print("Proceeding with random initialization...")
+    else:
+        print(f"⚠ Warning: Checkpoint not found at {args.checkpoint}")
+        print("Proceeding with random initialization...")
+    
+    model = model.to(device)
+    model.eval()
+    
+    # Load dataloaders
+    print("Loading CIFAR-10 dataloaders...")
+    _, test_loader, class_names = get_dataloaders(
+        args.data_dir,
+        args.model_name,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers
+    )
+    
+    # Run inference on test set
+    print(f"\nRunning inference on test set ({10000} images)...")
+    all_predictions = []
+    all_labels = []
+    all_logits = []
+    
+    with torch.no_grad():
+        for batch in tqdm(test_loader, desc='Inference'):
+            if len(batch) == 3:
+                images, labels, metadata = batch
+            else:
+                images, labels = batch
+            
+            images = images.to(device)
+            labels = labels.to(device)
+            
+            # Forward pass
+            logits, _ = model(images)
+            
+            # Store results
+            all_logits.append(logits)
+            all_labels.append(labels)
+            all_predictions.append(logits.argmax(dim=1))
+    
+    # Concatenate all batches
+    all_logits = torch.cat(all_logits, dim=0)
+    all_labels = torch.cat(all_labels, dim=0)
+    all_predictions = torch.cat(all_predictions, dim=0)
+    
+    # Convert to numpy
+    y_true = all_labels.cpu().numpy()
+    y_pred = all_predictions.cpu().numpy()
+    
+    print("✓ Inference completed!")
     
     # Calculate metrics
-    metrics = calculate_metrics(y_true, y_pred, y_logits, class_names)
+    print("\nCalculating metrics...")
+    metrics = calculate_metrics(y_true, y_pred, all_logits, class_names)
     
     # Generate summary
     df_overall, df_per_class = generate_metrics_summary(metrics, class_names)
     
-    # Test plotting functions
-    import tempfile
-    temp_dir = tempfile.mkdtemp()
+    # Create output directory
+    os.makedirs(args.output_dir, exist_ok=True)
     
+    # Save results
+    print("\nSaving results...")
     plot_confusion_matrix(
         y_true, y_pred, class_names,
-        os.path.join(temp_dir, 'confusion_matrix.png')
+        os.path.join(args.output_dir, 'confusion_matrix.png')
     )
     
     generate_classification_report(
         y_true, y_pred, class_names,
-        os.path.join(temp_dir, 'classification_report.txt')
+        os.path.join(args.output_dir, 'classification_report.txt')
     )
     
     plot_per_class_metrics(
         metrics, class_names,
-        os.path.join(temp_dir, 'per_class_metrics.png')
+        os.path.join(args.output_dir, 'per_class_metrics.png')
     )
     
     save_metrics_json(
         metrics,
-        os.path.join(temp_dir, 'metrics.json')
+        os.path.join(args.output_dir, 'metrics.json')
     )
     
-    print(f"\n✓ All test outputs saved to: {temp_dir}")
-    print("✓ Metrics module test completed!")
+    # Save summary dataframes
+    df_overall.to_csv(
+        os.path.join(args.output_dir, 'overall_metrics.csv'),
+        index=False
+    )
+    df_per_class.to_csv(
+        os.path.join(args.output_dir, 'per_class_metrics.csv'),
+        index=False
+    )
+    
+    # Print summary
+    print("\n" + "="*60)
+    print("OVERALL METRICS")
+    print("="*60)
+    print(df_overall.to_string(index=False))
+    
+    print("\n" + "="*60)
+    print("PER-CLASS METRICS")
+    print("="*60)
+    print(df_per_class.to_string(index=False))
+    
+    print(f"\n✓ All results saved to: {args.output_dir}")
+    print("✓ Metrics evaluation completed!")
