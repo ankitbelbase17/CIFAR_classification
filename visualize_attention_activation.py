@@ -43,13 +43,20 @@ def visualize_attention_maps(
     # Get attention from CLS token to all patches
     cls_attn = attn[0, 1:]  # Skip CLS token itself
     
-    # Reshape to spatial dimensions
-    num_patches = int(np.sqrt(len(cls_attn)))
-    attn_map = cls_attn.reshape(num_patches, num_patches)
+    # Reshape to spatial dimensions (handle non-square patches)
+    seq_len = len(cls_attn)
+    num_patches_h = int(np.ceil(np.sqrt(seq_len)))
+    num_patches_w = (seq_len + num_patches_h - 1) // num_patches_h
+    
+    # Pad if necessary
+    if seq_len < num_patches_h * num_patches_w:
+        cls_attn = np.pad(cls_attn, (0, num_patches_h * num_patches_w - seq_len), mode='edge')
+    
+    attn_map = cls_attn.reshape(num_patches_h, num_patches_w)
     
     # Resize to image size
-    attn_map = np.array(Image.fromarray(attn_map).resize(image_size, Image.BILINEAR))
-    attn_map = (attn_map - attn_map.min()) / (attn_map.max() - attn_map.min())
+    attn_map = np.array(Image.fromarray((attn_map * 255).astype(np.uint8)).resize(image_size, Image.BILINEAR)) / 255.0
+    attn_map = (attn_map - attn_map.min()) / (attn_map.max() - attn_map.min() + 1e-8)
     
     # Prepare image
     img = image.cpu().permute(1, 2, 0).numpy()
@@ -121,13 +128,20 @@ def visualize_all_attention_heads(
         # Get CLS token attention
         cls_attn = attn[head_idx, 0, 1:]
         
-        # Reshape to spatial
-        num_patches = int(np.sqrt(len(cls_attn)))
-        attn_map = cls_attn.reshape(num_patches, num_patches)
+        # Reshape to spatial (handle non-square patches)
+        seq_len = len(cls_attn)
+        num_patches_h = int(np.ceil(np.sqrt(seq_len)))
+        num_patches_w = (seq_len + num_patches_h - 1) // num_patches_h
+        
+        # Pad if necessary
+        if seq_len < num_patches_h * num_patches_w:
+            cls_attn = np.pad(cls_attn, (0, num_patches_h * num_patches_w - seq_len), mode='edge')
+        
+        attn_map = cls_attn.reshape(num_patches_h, num_patches_w)
         
         # Resize
-        attn_map = np.array(Image.fromarray(attn_map).resize(image_size, Image.BILINEAR))
-        attn_map = (attn_map - attn_map.min()) / (attn_map.max() - attn_map.min())
+        attn_map = np.array(Image.fromarray((attn_map * 255).astype(np.uint8)).resize(image_size, Image.BILINEAR)) / 255.0
+        attn_map = (attn_map - attn_map.min()) / (attn_map.max() - attn_map.min() + 1e-8)
         
         # Prepare image
         img = image.cpu().permute(1, 2, 0).numpy()
@@ -193,8 +207,17 @@ def visualize_activation_maps(
         seq_len, hidden_dim = activations.shape
         
         if seq_len > 1:  # Has patches
-            num_patches = int(np.sqrt(seq_len - 1))  # Exclude CLS token
+            # Calculate spatial dimensions (handle non-square patches)
+            num_patches_total = seq_len - 1  # Exclude CLS token
+            num_patches_h = int(np.ceil(np.sqrt(num_patches_total)))
+            num_patches_w = (num_patches_total + num_patches_h - 1) // num_patches_h
+            
             patch_activations = activations[1:, :]  # Skip CLS token
+            
+            # Pad if necessary to make rectangular grid
+            if patch_activations.shape[0] < num_patches_h * num_patches_w:
+                pad_size = num_patches_h * num_patches_w - patch_activations.shape[0]
+                patch_activations = np.pad(patch_activations, ((0, pad_size), (0, 0)), mode='edge')
             
             # Sample feature channels
             channel_indices = np.linspace(0, hidden_dim - 1, num_features // 8, dtype=int)
@@ -202,7 +225,7 @@ def visualize_activation_maps(
             for feat_idx, channel_idx in enumerate(channel_indices):
                 # Get feature map
                 feat_map = patch_activations[:, channel_idx]
-                feat_map = feat_map.reshape(num_patches, num_patches)
+                feat_map = feat_map.reshape(num_patches_h, num_patches_w)
                 
                 # Normalize
                 feat_map = (feat_map - feat_map.min()) / (feat_map.max() - feat_map.min() + 1e-8)
@@ -243,10 +266,22 @@ def visualize_cls_token_evolution(
     cls_tokens = []
     
     for layer_hidden in hidden_states:
-        cls_token = layer_hidden[0, 0, :].cpu().detach().numpy()
+        # Handle different shapes - get CLS token (first token)
+        hidden = layer_hidden[0, 0, :]  # (batch, seq, hidden) -> (hidden,)
+        cls_token = hidden.cpu().detach().numpy()
         cls_tokens.append(cls_token)
     
-    cls_tokens = np.array(cls_tokens)  # (num_layers, hidden_dim)
+    # Get the maximum hidden dimension to pad all tokens to the same size
+    max_hidden_dim = max(len(token) for token in cls_tokens)
+    
+    # Pad all CLS tokens to the same dimension
+    cls_tokens_padded = []
+    for token in cls_tokens:
+        if len(token) < max_hidden_dim:
+            token = np.pad(token, (0, max_hidden_dim - len(token)), mode='edge')
+        cls_tokens_padded.append(token)
+    
+    cls_tokens = np.array(cls_tokens_padded)  # (num_layers, hidden_dim)
     
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 5))
     
@@ -275,35 +310,88 @@ def visualize_cls_token_evolution(
 
 
 def main(args):
+    from dataloader import get_dataloaders
+    
     # Get device
     device = get_device()
+    print(f"✓ Using device: {device}")
     
-    # Load processor
-    processor_map = {
-        'dinov2': 'facebook/dinov2-base',
-        'mae': 'facebook/vit-mae-base',
-        'swin': 'microsoft/swinv2-base-patch4-window8-256',
-        'vit': 'google/vit-base-patch16-224',
-        'clip': 'openai/clip-vit-base-patch32',
-        'vla': 'google/siglip-base-patch16-224'
-    }
+    # Load image based on input method
+    if args.image_path:
+        # Load from file path
+        print(f"Loading image from file: {args.image_path}")
+        processor_map = {
+            'dinov2': 'facebook/dinov2-base',
+            'mae': 'facebook/vit-mae-base',
+            'swin': 'microsoft/swinv2-base-patch4-window8-256',
+            'vit': 'google/vit-base-patch16-224',
+            'clip': 'openai/clip-vit-base-patch32',
+            'vla': 'google/siglip-base-patch16-224',
+            'custom': 'google/vit-base-patch16-224'
+        }
+        
+        processor = AutoImageProcessor.from_pretrained(
+            processor_map[args.model_name.lower()]
+        )
+        
+        image = Image.open(args.image_path).convert('RGB')
+        processed = processor(images=image, return_tensors="pt")
+        pixel_values = processed['pixel_values'].to(device)
+        class_name = "Unknown"
+        
+    elif args.data_dir:
+        # Load from dataloader
+        print(f"Loading image from {args.split} dataloader...")
+        if args.split == 'test':
+            _, dataloader, class_names = get_dataloaders(
+                args.data_dir,
+                args.model_name,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers
+            )
+        else:
+            dataloader, _, class_names = get_dataloaders(
+                args.data_dir,
+                args.model_name,
+                batch_size=args.batch_size,
+                num_workers=args.num_workers
+            )
+        
+        # Get first batch
+        print("Loading first image from batch...")
+        for batch in dataloader:
+            if len(batch) == 3:
+                pixel_values, labels, metadata = batch
+            else:
+                pixel_values, labels = batch
+            break
+        
+        # Get first image from batch
+        pixel_values = pixel_values.to(device)
+        label = labels[0].item()
+        class_name = class_names[label]
+    else:
+        raise ValueError("Either --image_path or --data_dir must be provided")
     
-    processor = AutoImageProcessor.from_pretrained(
-        processor_map[args.model_name.lower()]
-    )
-    
-    # Load image
-    image = Image.open(args.image_path).convert('RGB')
-    processed = processor(images=image, return_tensors="pt")
-    pixel_values = processed['pixel_values'].to(device)
+    print(f"✓ Loaded image of class: {class_name}")
     
     # Create model
+    print(f"✓ Loading {args.model_name} model...")
     model = get_model(args.model_name, num_classes=args.num_classes)
     model = model.to(device)
     
-    # Load checkpoint
+    # Load checkpoint if provided
     if args.checkpoint:
-        load_checkpoint(args.checkpoint, model, device=device)
+        if os.path.exists(args.checkpoint):
+            try:
+                load_checkpoint(args.checkpoint, model, device=device)
+                print(f"✓ Loaded checkpoint from {args.checkpoint}")
+            except Exception as e:
+                print(f"⚠ Warning: Could not load checkpoint - {e}")
+                print("Proceeding with random initialization...")
+        else:
+            print(f"⚠ Warning: Checkpoint not found at {args.checkpoint}")
+            print("Proceeding with random initialization...")
     
     model.eval()
     
@@ -353,28 +441,42 @@ def main(args):
                 os.path.join(args.output_dir, 'cls_token_evolution.png')
             )
     
-    print(f"\n✓ All visualizations saved to: {args.output_dir}")
+    print(f"\n✓ Class: {class_name}")
+    print(f"✓ All visualizations saved to: {args.output_dir}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description='Visualize attention and activation maps'
+        description='Visualize attention and activation maps from image file or dataloader'
     )
     parser.add_argument('--model_name', type=str, required=True,
-                        choices=['dinov2', 'mae', 'swin', 'vit', 'clip', 'vla'],
+                        choices=['dinov2', 'mae', 'swin', 'vit', 'clip', 'vla', 'custom'],
                         help='Model architecture')
-    parser.add_argument('--image_path', type=str, required=True,
-                        help='Path to input image')
+    
+    # Image input options (mutually exclusive)
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument('--image_path', type=str, default=None,
+                        help='Path to input image file')
+    input_group.add_argument('--data_dir', type=str, default=None,
+                        help='Path to CIFAR-10 data directory (loads from dataloader)')
+    
     parser.add_argument('--checkpoint', type=str, default=None,
                         help='Path to model checkpoint (optional)')
     parser.add_argument('--num_classes', type=int, default=10,
-                        help='Number of classes (for model creation)')
+                        help='Number of classes')
     parser.add_argument('--output_dir', type=str, default='visualizations',
                         help='Output directory')
     parser.add_argument('--layer_idx', type=int, default=-1,
                         help='Layer index to visualize (-1 for last)')
     parser.add_argument('--head_idx', type=int, default=0,
                         help='Attention head index to visualize')
+    parser.add_argument('--split', type=str, default='test',
+                        choices=['train', 'test'],
+                        help='Dataset split to use (when using --data_dir)')
+    parser.add_argument('--batch_size', type=int, default=1,
+                        help='Batch size (when using --data_dir, only first image used)')
+    parser.add_argument('--num_workers', type=int, default=4,
+                        help='Number of data loading workers (when using --data_dir)')
     
     args = parser.parse_args()
     main(args)
