@@ -103,8 +103,6 @@ class SwinTransformerClassifier(nn.Module):
                 param.requires_grad = False
         
         self.classifier = nn.Sequential(
-            nn.AdaptiveAvgPool1d(1),
-            nn.Flatten(),
             nn.LayerNorm(self.hidden_size),
             nn.Linear(self.hidden_size, self.hidden_size // 2),
             nn.GELU(),
@@ -116,8 +114,8 @@ class SwinTransformerClassifier(nn.Module):
         
     def forward(self, pixel_values: torch.Tensor) -> Tuple[torch.Tensor, Dict]:
         outputs = self.backbone(pixel_values, output_attentions=True, output_hidden_states=True)
-        # Swin outputs: (B, H, W, C) -> pool over spatial dims
-        pooled = outputs.last_hidden_state.mean(dim=[1, 2])
+        # Swin outputs: (B, num_patches, C) -> pool over patches
+        pooled = outputs.last_hidden_state.mean(dim=1)
         logits = self.classifier(pooled)
         
         return logits, {

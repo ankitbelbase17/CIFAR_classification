@@ -246,12 +246,6 @@ def main(args):
         freeze_backbone=args.freeze_backbone
     )
     
-    # Apply Xavier initialization if no checkpoint
-    if not args.resume:
-        print("Applying Xavier initialization to classifier...")
-        if hasattr(model, 'classifier'):
-            model.classifier.apply(xavier_init)
-    
     model = model.to(device)
     
     # Print parameter count
@@ -295,7 +289,13 @@ def main(args):
             best_val_acc = checkpoint.get('best_val_acc', 0.0)
             print(f"Resumed from epoch {start_epoch}, iteration {global_iter}")
         else:
-            print(f"No checkpoint found at {checkpoint_path}, starting fresh")
+            print(f"No checkpoint found at {checkpoint_path}, applying Xavier initialization")
+            if hasattr(model, 'classifier'):
+                model.classifier.apply(xavier_init)
+    else:
+        print("Applying Xavier initialization to classifier...")
+        if hasattr(model, 'classifier'):
+            model.classifier.apply(xavier_init)
     
     # Training loop
     print(f"\nStarting training for {args.epochs} epochs...\n")
