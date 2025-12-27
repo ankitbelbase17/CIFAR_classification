@@ -29,7 +29,7 @@ A comprehensive deep learning project for image classification using DINOv2 and 
 
 ```bash
 # Clone repository
-git clone <your-repo>
+git clone <this-repo>
 cd cv_classification_project
 
 # Create virtual environment
