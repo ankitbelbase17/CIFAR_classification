@@ -1,12 +1,23 @@
 
 # Computer Vision Classification Project
 
-A comprehensive deep learning project for image classification using state-of-the-art models.
+A comprehensive deep learning project for image classification using DINOv2 and Swin Transformer V2 - two state-of-the-art vision transformers for high-performance image classification.
+
+## Model Performance Comparison
+
+| Metric | Swin | DINOv2 |
+|--------|------|--------|
+| Accuracy | 0.9644 | 0.9721 |
+| Precision (Macro) | 0.99509 | 0.97893 |
+| Recall (Macro) | 0.9812 | 0.9786 |
+| F1 Score (Macro) | 0.9812 | 0.97862 |
+| Matthews Correlation Coefficient | 0.97912 | 0.97625 |
+| Cohen's Kappa | 0.97911 | 0.97622 |
+| ROC-AUC (Macro) | 0.99936 | 0.99892 |
 
 ## Features
 
-- **Multiple SOTA Models**: DINOv2, MAE, Swin Transformer V2, ViT, CLIP, OpenVLA
-- **Stable Diffusion**: Zero-shot classification (inference-only)
+- **Two SOTA Vision Transformers**: DINOv2, Swin Transformer V2
 - **Production Ready**: Complete training, inference, and evaluation pipelines
 - **WandB Integration**: Real-time training monitoring and visualization
 - **Checkpointing**: Auto-save every 250 iterations with best model tracking
@@ -86,26 +97,25 @@ data/
 # Train DINOv2
 bash scripts/train.sh dinov2 ./data ./experiments 32 50 1e-4
 
-# Train with different models
-bash scripts/train.sh vit ./data
-bash scripts/train.sh swin ./data
-bash scripts/train.sh clip ./data
+# Train Swin Transformer V2
+bash scripts/train.sh swin ./data ./experiments 32 50 1e-4
 ```
 
 ### 3. Run Inference
 
 ```bash
-# Batch inference
+# Batch inference with DINOv2
 bash scripts/inference.sh dinov2 ./experiments/checkpoints/dinov2_best.pth batch ./data
 
-# Single image inference
-bash scripts/inference.sh vit ./experiments/checkpoints/vit_best.pth single ./data ./image.jpg
+# Single image inference with Swin
+bash scripts/inference.sh swin ./experiments/checkpoints/swin_best.pth single ./data ./image.jpg
 ```
 
 ### 4. Evaluate Metrics
 
 ```bash
 bash scripts/metrics.sh dinov2 ./experiments/checkpoints/dinov2_best.pth ./data
+bash scripts/metrics.sh swin ./experiments/checkpoints/swin_best.pth ./data
 ```
 
 ### 5. Visualize Attention Maps
@@ -116,13 +126,12 @@ python visualize_attention_activation.py \
     --image_path ./test_image.jpg \
     --checkpoint ./experiments/checkpoints/dinov2_best.pth \
     --output_dir ./visualizations
-```
 
-### 6. Stable Diffusion Classification
-
-```bash
-# Zero-shot classification (no training needed!)
-bash stable_diffusion/sd_inference.sh single ./test_image.jpg "" ./sd_results.json clip
+python visualize_attention_activation.py \
+    --model_name swin \
+    --image_path ./test_image.jpg \
+    --checkpoint ./experiments/checkpoints/swin_best.pth \
+    --output_dir ./visualizations
 ```
 
 ## Training Features
@@ -139,60 +148,99 @@ bash stable_diffusion/sd_inference.sh single ./test_image.jpg "" ./sd_results.js
 ## Models
 
 ### 1. DINOv2 (Meta)
-- Self-supervised vision transformer
-- Excellent for transfer learning
-- ~86M parameters
 
-### 2. Masked Autoencoder (MAE)
-- Self-supervised pre-training
-- Strong feature representations
-- ~86M parameters
+DINOv2 is a self-supervised vision transformer developed by Meta that provides exceptional transfer learning capabilities for image classification tasks. It learns rich visual representations through self-supervised learning without requiring labeled data for pre-training.
 
-### 3. Swin Transformer V2
-- Hierarchical vision transformer
-- Efficient for various image sizes
+**Key Characteristics:**
+- Self-supervised pre-training using contrastive learning
+- Excellent zero-shot and few-shot capabilities
+- Strong feature representations for downstream tasks
+- ~86M parameters
+- Uses CLS token for classification
+- Architecture: Vision Transformer base model
+
+**Performance:**
+- Achieves 97.21% accuracy on the benchmark dataset
+- Macro F1 Score: 0.97862
+- ROC-AUC: 0.99892
+- Strong performance across all metrics
+
+### 2. Swin Transformer V2 (Microsoft)
+
+Swin Transformer V2 is a hierarchical vision transformer that processes images at multiple scales, making it efficient for various input image sizes and computational budgets. The hierarchical design with shifted windows provides a good balance between accuracy and efficiency.
+
+**Key Characteristics:**
+- Hierarchical multi-scale architecture
+- Shifted window-based attention mechanism
+- Efficient computation with linear complexity relative to input size
 - ~88M parameters
+- Uses mean pooling over patches for classification
+- Architecture: Hierarchical transformer with 4 stages
 
-### 4. Vision Transformer (ViT)
-- Original transformer for images
-- Strong performance on many tasks
-- ~86M parameters
-
-### 5. CLIP (OpenAI)
-- Vision-language model
-- Zero-shot capabilities
-- ~149M parameters
-
-### 6. OpenVLA
-- Vision-Language-Action model
-- ~200M parameters
-- Inspired by robotics applications
-
-### 7. Stable Diffusion (Inference-Only)
-- Zero-shot classification
-- No training required
-- Uses CLIP and diffusion features
+**Performance:**
+- Achieves 96.44% accuracy on the benchmark dataset
+- Macro F1 Score: 0.9812
+- ROC-AUC: 0.99936
+- Highest precision (0.99509) among the two models
+- Best ROC-AUC performance
 
 ## Testing
 
 ```bash
-# Run all tests
+# Run model tests
 python tests/test_model.py
+
+# Run training tests
 python tests/test_train.py
+
+# Run inference tests
 python tests/test_inference.py
 
 # Run specific test
 python -m pytest tests/test_model.py::TestModels::test_dinov2_forward
+python -m pytest tests/test_model.py::TestModels::test_swin_forward
 ```
 
 ## Configuration
 
 Edit `config.yaml` to customize:
-- Model architecture
+- Model architecture (dinov2 or swin)
 - Training hyperparameters
 - Data augmentation
 - Logging frequency
 - Class names
+
+## Model Comparison
+
+### DINOv2 vs Swin Transformer V2
+
+**DINOv2 Advantages:**
+- Higher overall accuracy (97.21% vs 96.44%)
+- Better macro recall performance
+- Self-supervised pre-training provides strong representations
+- Excellent for transfer learning tasks
+- Better generalization on unseen classes
+
+**Swin Transformer V2 Advantages:**
+- Superior precision metrics (0.99509)
+- Highest ROC-AUC score (0.99936)
+- More efficient with hierarchical architecture
+- Better for scenarios where false positives are critical
+- Shifted window attention reduces computational cost
+
+### When to Use Which Model
+
+**Choose DINOv2 when:**
+- Maximizing overall accuracy is the priority
+- Transfer learning on downstream tasks is required
+- Working with limited labeled data
+- Feature extraction quality is important
+
+**Choose Swin Transformer V2 when:**
+- Minimizing false positives is critical
+- Computational efficiency is important
+- Working with various image resolutions
+- High precision predictions are needed
 
 ## WandB Logging
 
@@ -204,38 +252,32 @@ The project logs:
 - Per-class metrics
 - Training curves
 
-## Tips
+## Implementation Details
 
-1. **Start with frozen backbone** for faster initial training:
-   ```bash
-   python train.py --model_name dinov2 --freeze_backbone ...
-   ```
+### DINOv2 Implementation
+The DINOv2 classifier uses the base model from Meta with:
+- Classification head: LayerNorm → Linear (768→384) → GELU → Dropout(0.1) → Linear (384→num_classes)
+- Xavier initialization for all linear layers
+- CLS token extraction for classification
+- Layer normalization before the classification layers
 
-2. **Use smaller batch size** if running out of memory:
-   ```bash
-   bash scripts/train.sh dinov2 ./data ./experiments 16
-   ```
+### Swin Transformer V2 Implementation
+The Swin Transformer V2 classifier uses the base model from Microsoft with:
+- Classification head: LayerNorm → Linear (768→384) → GELU → Dropout(0.1) → Linear (384→num_classes)
+- Xavier initialization for all linear layers
+- Mean pooling over all patches for classification
+- Layer normalization before the classification layers
 
-3. **Monitor training** with WandB:
-   - Visit https://wandb.ai after training starts
-
-4. **Try ensemble methods** for better accuracy:
-   - Train multiple models and average predictions
-
-## Troubleshooting
-
-- **CUDA out of memory**: Reduce batch size or use smaller model
-- **Slow training**: Enable mixed precision, increase num_workers
-- **Poor accuracy**: Check data quality, try data augmentation, increase epochs
+Both models support:
+- Backbone freezing for faster training or feature extraction
+- Output of attention maps and hidden states for visualization
+- Mixed precision training with automatic mixed precision (AMP)
 
 ## Citation
 
 If you use this codebase, please cite the respective model papers:
 - DINOv2: https://arxiv.org/abs/2304.07193
-- MAE: https://arxiv.org/abs/2111.06377
-- Swin Transformer: https://arxiv.org/abs/2103.14030
-- ViT: https://arxiv.org/abs/2010.11929
-- CLIP: https://arxiv.org/abs/2103.00020
+- Swin Transformer V2: https://arxiv.org/abs/2111.06377
 
 ## License
 
